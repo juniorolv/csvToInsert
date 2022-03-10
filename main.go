@@ -37,6 +37,13 @@ func main() {
 		linesPerFileOutput, err = strconv.Atoi(args[4])
 		checkError(err)
 	}
+	groupLines := ""
+	if len(args) >= 6 {
+		if args[5] != "" {
+			groupLines = args[5]
+		}
+	}
+	groupedValue := "$1"
 	if linesPerFileOutput == 0 {
 		log.Panicln("Lines per page must be at least 1!")
 	}
@@ -53,23 +60,68 @@ func main() {
 	}
 	fileDestination := createFileDestination(firstFilename)
 	defer fileDestination.Close()
+	groupedLines := make(map[string]map[string]map[string]string)
+
 	for {
 		line, err := csvReader.Read()
 		if err == io.EOF {
 			log.Println("EOF found.")
-			fileDestination.Close()
-			os.Exit(0)
+			break
 		}
 		checkError(err)
-		currentString := stringOriginal
 		if len(line) < minParams {
 			log.Println("Skipping line with less than min params: ")
 			log.Print(line)
 			continue
 		}
+		group := strconv.Itoa(currNumberOfLines)
+		groupedLines[group] = make(map[string]map[string]string)
+		//groupedLines[group][strconv.Itoa(currNumberOfLines)] = make(map[string]string)
+		lineValues := make(map[string]string)
 		for index, value := range line {
-			currentString = strings.ReplaceAll(currentString, ("$" + strconv.Itoa(index+1)), strings.TrimSpace(value))
+			if groupLines != "" && ("$"+strconv.Itoa(index+1)) == groupLines {
+				group = strings.TrimSpace(value)
+				if groupedLines[group] == nil {
+					groupedLines[group] = make(map[string]map[string]string)
+				}
+			}
+			lineValues["$"+strconv.Itoa(index+1)] = strings.TrimSpace(value)
 		}
+		groupedLines[group][strconv.Itoa(currNumberOfLines)] = lineValues
+		currNumberOfLines++
+	}
+	currNumberOfLines = 0
+	currentStrings := make(map[string]string)
+	group := ""
+	for _, lines := range groupedLines {
+		if groupLines == "" {
+			group = strconv.Itoa(currNumberOfLines)
+			currentStrings[group] = stringOriginal
+			for _, positions := range lines {
+				for position, value := range positions {
+					currentStrings[group] = strings.ReplaceAll(currentStrings[group], position, strings.TrimSpace(value))
+				}
+			}
+		} else if groupLines != "" {
+			groupedValues := []string{}
+			for _, positions := range lines {
+				group = positions[groupLines]
+				for position, value := range positions {
+					if currentStrings[group] == "" {
+						currentStrings[group] = stringOriginal
+					}
+					if position == groupLines {
+						currentStrings[group] = strings.ReplaceAll(currentStrings[group], position, strings.TrimSpace(value))
+						continue
+					}
+					groupedValues = append(groupedValues, value)
+				}
+			}
+			groupedValuesString := strings.Join(groupedValues, "','")
+			currentStrings[group] = strings.ReplaceAll(currentStrings[group], groupedValue, groupedValuesString)
+		}
+	}
+	for _, currentString := range currentStrings {
 		fileDestination.WriteString(currentString + "\n")
 		currNumberOfLines++
 		if currNumberOfLines == linesPerFileOutput {
